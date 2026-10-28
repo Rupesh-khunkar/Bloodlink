@@ -29,4 +29,4 @@ docs/er.png         # ER diagram
 docs/screenshots/   # add your screenshots
 ```
 ## ER diagram
-![ER](docs/er.png)
+![ER](er.png)
