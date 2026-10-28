@@ -3,7 +3,7 @@ DBMS Mini Project · Dr. Mrudula Gudadhe · Author:Rupesh Khunkar Roll No:143
 
 A database-driven web app (SQLite running **in the browser** via sql.js) that manages donors, donations, hospitals, blood requests and live blood stock.
 
-**Live demo:** https://YOUR-USERNAME.github.io/bloodlink/
+**Live demo:** https://rupesh-khunkar.github.io/Bloodlink/
 
 ## Features
 - Normalized (3NF) schema with PK/FK, UNIQUE and CHECK constraints
