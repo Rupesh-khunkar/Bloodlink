@@ -14,19 +14,16 @@ A database-driven web app (SQLite running **in the browser** via sql.js) that ma
 - Built-in **SQL Console** with 10 sample queries
 
 ## Run locally
-1. `git clone https://github.com/YOUR-USERNAME/bloodlink.git`
+1. git clone https://github.com/Rupesh-khunkar/Bloodlink.git
 2. Open `index.html` in a browser (internet needed once for the sql.js CDN).
 
 ## Database setup
 `schema.sql` has all tables, triggers, views and sample data (SQLite). For MySQL, change `AUTOINCREMENT` to `AUTO_INCREMENT` and adapt the trigger syntax.
 
 ## Structure
-```
 index.html          # app (UI + embedded schema)
 schema.sql          # schema + sample data
-Project_Report.pdf  # report
-docs/er.png         # ER diagram
-docs/screenshots/   # add your screenshots
-```
+Project_Report.pdf  # project report
+er.png              # ER diagram
 ## ER diagram
 ![ER](er.png)
