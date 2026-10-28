@@ -1,0 +1,161 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>BloodLink – DBMS Mini Project</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-asm.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#64707d;--ac:#2563eb;--bd:#dfe3e8;--er:#c62828;--ok:#2e7d32;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mu:#9aa5b1;--ac:#6ea0ff;--bd:#2f353d;--er:#ff8a80;--ok:#81c784}}
+:root[data-theme="dark"]{--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mu:#9aa5b1;--ac:#6ea0ff;--bd:#2f353d;--er:#ff8a80;--ok:#81c784}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:14px 18px;border-bottom:1px solid var(--bd);background:var(--card)}h1{margin:0;font-size:19px}header small{color:var(--mu)}
+nav{display:flex;gap:6px;flex-wrap:wrap;padding:10px 18px}nav button{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:6px 12px;border-radius:999px;cursor:pointer}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}main{padding:6px 18px 40px;max-width:1100px;margin:auto}
+h2{text-transform:capitalize;font-size:17px}.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin:10px 0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.stats b{display:block;font-size:24px;color:var(--ac)}
+.w{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 9px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}th{color:var(--mu);font-weight:600}
+.form{display:flex;gap:6px;flex-wrap:wrap}input,select,textarea{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px;font:inherit}
+textarea{width:100%;height:150px;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace}
+button.p,td button{background:var(--ac);color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer}td button.d{background:var(--er)}
+.msg{font:12px ui-monospace,Menlo,monospace;color:var(--mu);margin:8px 0;white-space:pre-wrap;word-break:break-all}.msg.e{color:var(--er)}.msg.o{color:var(--ok)}pre{white-space:pre-wrap;font-size:12px}
+</style></head><body>
+<header><h1>🩸 BloodLink – Blood Bank Management System</h1><small>DBMS Mini Project · SQLite database running entirely in your browser</small></header>
+<nav id="nav"></nav><main id="main">Loading database…</main>
+<script>
+const SCHEMA=`-- BloodLink: Blood Bank Management System (SQLite dialect)
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE blood_group (
+  blood_group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE CHECK (name IN ('A+','A-','B+','B-','O+','O-','AB+','AB-'))
+);
+CREATE TABLE stock (
+  blood_group_id  INTEGER PRIMARY KEY REFERENCES blood_group(blood_group_id) ON DELETE CASCADE,
+  units_available INTEGER NOT NULL DEFAULT 0 CHECK (units_available >= 0)
+);
+CREATE TABLE donor (
+  donor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL UNIQUE,
+  age INTEGER NOT NULL CHECK (age BETWEEN 18 AND 65),
+  blood_group_id INTEGER NOT NULL REFERENCES blood_group(blood_group_id) ON DELETE RESTRICT,
+  city TEXT,
+  last_donation_date TEXT
+);
+CREATE TABLE hospital (
+  hospital_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  city TEXT NOT NULL,
+  phone TEXT NOT NULL UNIQUE
+);
+CREATE TABLE donation (
+  donation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  donor_id INTEGER NOT NULL REFERENCES donor(donor_id) ON DELETE RESTRICT,
+  donation_date TEXT NOT NULL DEFAULT (date('now')),
+  units INTEGER NOT NULL DEFAULT 1 CHECK (units BETWEEN 1 AND 2)
+);
+CREATE TABLE blood_request (
+  blood_request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hospital_id INTEGER NOT NULL REFERENCES hospital(hospital_id) ON DELETE RESTRICT,
+  blood_group_id INTEGER NOT NULL REFERENCES blood_group(blood_group_id) ON DELETE RESTRICT,
+  units INTEGER NOT NULL CHECK (units > 0),
+  request_date TEXT NOT NULL DEFAULT (date('now')),
+  status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Fulfilled','Rejected'))
+);
+
+-- TRIGGERS ------------------------------------------------
+CREATE TRIGGER trg_stock_row AFTER INSERT ON blood_group
+BEGIN INSERT INTO stock(blood_group_id) VALUES (NEW.blood_group_id); END;
+
+CREATE TRIGGER trg_donor_eligibility BEFORE INSERT ON donation
+WHEN (SELECT last_donation_date FROM donor WHERE donor_id = NEW.donor_id) IS NOT NULL
+ AND julianday(NEW.donation_date) - julianday((SELECT last_donation_date FROM donor WHERE donor_id = NEW.donor_id)) < 90
+BEGIN SELECT RAISE(ABORT, 'Donor not eligible: 90-day gap required between donations'); END;
+
+CREATE TRIGGER trg_donation_stock AFTER INSERT ON donation
+BEGIN
+  UPDATE stock SET units_available = units_available + NEW.units
+   WHERE blood_group_id = (SELECT blood_group_id FROM donor WHERE donor_id = NEW.donor_id);
+  UPDATE donor SET last_donation_date = NEW.donation_date WHERE donor_id = NEW.donor_id;
+END;
+
+CREATE TRIGGER trg_check_stock BEFORE UPDATE OF status ON blood_request
+WHEN OLD.status = 'Pending' AND NEW.status = 'Fulfilled'
+ AND (SELECT units_available FROM stock WHERE blood_group_id = NEW.blood_group_id) < NEW.units
+BEGIN SELECT RAISE(ABORT, 'Insufficient stock to fulfil this request'); END;
+
+CREATE TRIGGER trg_issue_stock AFTER UPDATE OF status ON blood_request
+WHEN OLD.status = 'Pending' AND NEW.status = 'Fulfilled'
+BEGIN UPDATE stock SET units_available = units_available - NEW.units WHERE blood_group_id = NEW.blood_group_id; END;
+
+-- VIEWS ---------------------------------------------------
+CREATE VIEW v_stock AS
+SELECT bg.name AS blood_group, s.units_available
+FROM stock s JOIN blood_group bg USING (blood_group_id);
+
+CREATE VIEW v_donor_details AS
+SELECT d.donor_id, d.name, bg.name AS blood_group, d.age, d.city, d.phone, d.last_donation_date
+FROM donor d JOIN blood_group bg USING (blood_group_id);
+
+CREATE VIEW v_request_details AS
+SELECT r.blood_request_id, h.name AS hospital, bg.name AS blood_group, r.units, r.request_date, r.status
+FROM blood_request r JOIN hospital h USING (hospital_id) JOIN blood_group bg USING (blood_group_id);
+
+-- SAMPLE DATA ---------------------------------------------
+INSERT INTO blood_group(name) VALUES ('A+'),('A-'),('B+'),('B-'),('O+'),('O-'),('AB+'),('AB-');
+INSERT INTO donor(name,phone,age,blood_group_id,city) VALUES
+('Aarav Sharma','9876500001',28,1,'Nagpur'),('Priya Deshmukh','9876500002',24,3,'Nagpur'),
+('Rohan Patil','9876500003',31,5,'Wardha'),('Sneha Kulkarni','9876500004',26,6,'Nagpur'),
+('Imran Khan','9876500005',35,1,'Amravati'),('Neha Joshi','9876500006',22,3,'Nagpur'),
+('Karan Mehta','9876500007',40,7,'Nagpur'),('Divya Nair',  '9876500008',29,5,'Wardha'),
+('Meera Rao','9876500009',33,8,'Nagpur');
+INSERT INTO hospital(name,city,phone) VALUES
+('City Care Hospital','Nagpur','0712-111111'),('Lifeline Hospital','Nagpur','0712-222222'),('Sunrise Medical Centre','Wardha','07152-333333');
+INSERT INTO donation(donor_id,donation_date,units) VALUES
+(1,'2026-06-10',1),(1,'2026-10-05',1),(2,'2026-10-01',1),(3,'2026-09-15',1),(4,'2026-10-03',1),
+(5,'2026-09-20',1),(6,'2026-08-25',1),(7,'2026-09-28',1),(8,'2026-10-07',1);
+INSERT INTO blood_request(hospital_id,blood_group_id,units,request_date) VALUES
+(1,1,2,'2026-10-08'),(2,5,1,'2026-10-09'),(3,6,2,'2026-10-10');
+UPDATE blood_request SET status='Fulfilled' WHERE blood_request_id=1;
+`;
+const CFG={blood_group:['name'],donor:['name','phone','age','blood_group_id','city'],hospital:['name','city','phone'],donation:['donor_id','donation_date','units'],blood_request:['hospital_id','blood_group_id','units','request_date','status']};
+const SAMPLES=[
+['JOIN: request details (view)',"SELECT * FROM v_request_details;"],
+['Blood stock (view)',"SELECT * FROM v_stock ORDER BY units_available DESC;"],
+['GROUP BY: donations per blood group',"SELECT bg.name AS blood_group, COUNT(*) AS donations, SUM(d.units) AS units\nFROM donation d JOIN donor dn USING(donor_id)\nJOIN blood_group bg USING(blood_group_id)\nGROUP BY bg.blood_group_id ORDER BY units DESC;"],
+['Subquery: donors who never donated',"SELECT name, phone FROM donor\nWHERE donor_id NOT IN (SELECT donor_id FROM donation);"],
+['Donors eligible to donate today',"SELECT name, phone, blood_group, last_donation_date FROM v_donor_details\nWHERE last_donation_date IS NULL\n   OR julianday('now') - julianday(last_donation_date) >= 90;"],
+['Low stock alert (< 2 units)',"SELECT * FROM v_stock WHERE units_available < 2;"],
+['Pending requests vs stock',"SELECT r.blood_request_id, r.hospital, r.blood_group, r.units AS needed, s.units_available\nFROM v_request_details r JOIN v_stock s USING(blood_group)\nWHERE r.status='Pending';"],
+['TRIGGER test: donor donates too early (error)',"INSERT INTO donation(donor_id,donation_date,units) VALUES (2,'2026-10-20',1);"],
+['TRIGGER test: insufficient stock (error)',"UPDATE blood_request SET status='Fulfilled' WHERE blood_request_id=3;"],
+['TRANSACTION: new donation + fulfil request',"BEGIN;\nINSERT INTO donation(donor_id,donation_date,units) VALUES (9,'2026-10-11',1);\nUPDATE blood_request SET status='Fulfilled' WHERE blood_request_id=2;\nCOMMIT;\nSELECT * FROM v_stock;"]];
+let db,SQL,msg='',cur='dashboard';
+const $=s=>document.querySelector(s),main=$('#main');
+const esc=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function load(){db=new SQL.Database();db.exec(SCHEMA)}
+function q(sql,p){const r=db.exec(sql,p);return r[0]||{columns:[],values:[]}}
+function tbl(r,name){if(!r.columns.length)return'<p class="msg">No rows.</p>';
+ return'<div class="w"><table><tr>'+r.columns.map(c=>`<th>${esc(c)}</th>`).join('')+(name?'<th></th>':'')+'</tr>'+
+ r.values.map(v=>'<tr>'+v.map(x=>`<td>${esc(x)}</td>`).join('')+(name?`<td><button data-e="${esc(v[0])}">Edit</button> <button class="d" data-d="${esc(v[0])}">Delete</button></td>`:'')+'</tr>').join('')+'</table></div>'}
+function run(sql,p){try{db.run(sql,p);msg=`<div class="msg o">✔ ${esc(sql)}  ${p?esc(JSON.stringify(p)):''}</div>`}catch(e){msg=`<div class="msg e">✖ ${esc(e.message)}\n${esc(sql)}</div>`}}
+function crud(n){const f=CFG[n],pk=n+'_id',r=q(`SELECT * FROM ${n}`);let edit=null;
+ main.innerHTML=`<h2>${n.replace('_',' ')} (CRUD)</h2><div class="card"><div class="form">${f.map(c=>`<input id="f_${c}" placeholder="${c}" type="${c.includes('date')||c=='paid_on'?'date':'text'}">`).join('')}<button class="p" id="add">Add</button><button class="p" id="upd" style="display:none">Update</button></div>${msg}<small style="color:var(--mu)">Blank fields use the column default. Stock levels and last-donation date are maintained by triggers.</small></div><div class="card">${tbl(r,n)}</div>`;
+ const vals=()=>f.filter(c=>$('#f_'+c).value!=='');
+ $('#add').onclick=()=>{const c=vals();run(`INSERT INTO ${n}(${c.join(',')}) VALUES(${c.map(()=>'?').join(',')})`,c.map(k=>$('#f_'+k).value));crud(n)};
+ $('#upd').onclick=()=>{const c=vals();run(`UPDATE ${n} SET ${c.map(k=>k+'=?').join(',')} WHERE ${pk}=?`,[...c.map(k=>$('#f_'+k).value),edit]);crud(n)};
+ main.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{run(`DELETE FROM ${n} WHERE ${pk}=?`,[b.dataset.d]);crud(n)});
+ main.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{edit=b.dataset.e;const row=r.values.find(v=>String(v[0])===edit);f.forEach(c=>$('#f_'+c).value=row[r.columns.indexOf(c)]??'');$('#upd').style.display='';$('#add').style.display='none'})}
+function dash(){const c=t=>q(`SELECT COUNT(*) FROM ${t}`).values[0][0];
+ main.innerHTML=`<h2>Dashboard</h2><div class="stats">${['donor','hospital','donation','blood_request'].map(t=>`<div class="card"><b>${c(t)}</b>${t.replace('_',' ')}s</div>`).join('')}<div class="card"><b>${q("SELECT SUM(units_available) FROM stock").values[0][0]}</b>units in stock</div><div class="card"><b>${q("SELECT COUNT(*) FROM blood_request WHERE status='Pending'").values[0][0]}</b>pending requests</div></div>
+ <h2>Blood stock (view)</h2><div class="card">${tbl(q('SELECT * FROM v_stock'))}</div>
+ <h2>Pending requests (view)</h2><div class="card">${tbl(q("SELECT * FROM v_request_details WHERE status='Pending'"))}</div>`}
+function cons(){main.innerHTML=`<h2>SQL Console</h2><div class="card"><div class="form" style="margin-bottom:8px"><select id="smp"><option value="">Load a sample query…</option>${SAMPLES.map((s,i)=>`<option value="${i}">${esc(s[0])}</option>`).join('')}</select><button class="p" id="go">▶ Run</button><button class="p" id="rst" style="background:var(--mu)">Reset database</button></div><textarea id="sql" spellcheck="false">SELECT * FROM v_booking_details;</textarea></div><div id="out"></div>`;
+ $('#smp').onchange=e=>{if(e.target.value!=='')$('#sql').value=SAMPLES[e.target.value][1]};
+ $('#rst').onclick=()=>{load();$('#out').innerHTML='<div class="msg o">Database reset to sample data.</div>'};
+ $('#go').onclick=()=>{const o=$('#out');try{const rs=db.exec($('#sql').value);o.innerHTML=(rs.length?rs.map(r=>`<div class="card">${tbl(r)}</div>`).join(''):'')+'<div class="msg o">✔ Executed successfully.</div>'}catch(e){try{db.exec('ROLLBACK')}catch(_){}o.innerHTML=`<div class="msg e">✖ ${esc(e.message)}</div>`}}}
+function sch(){main.innerHTML=`<h2>Schema</h2><div class="card"><pre>${esc(SCHEMA)}</pre></div>`}
+const TABS=['dashboard',...Object.keys(CFG),'console','schema'];
+function show(t){cur=t;msg='';document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({dashboard:dash,console:cons,schema:sch}[t]||(()=>crud(t)))()}
+$('#nav').innerHTML=TABS.map(t=>`<button data-t="${t}">${t=='console'?'SQL Console':(t[0].toUpperCase()+t.slice(1)).replace('_',' ')}</button>`).join('');
+$('#nav').onclick=e=>e.target.dataset.t&&show(e.target.dataset.t);
+initSqlJs().then(S=>{SQL=S;load();show('dashboard')}).catch(e=>main.textContent='Failed to load SQL engine: '+e);
+</script></body></html>
